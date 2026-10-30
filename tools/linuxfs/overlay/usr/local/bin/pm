@@ -1,0 +1,103 @@
+#!/usr/bin/python3
+"""Stub for Android's pm command that launches Android apps from the Linux runtime.
+
+This script accepts the same arguments as Android's pm command for launching activities,
+and forwards the request to the Android side of DroidDeck via the session channel.
+
+Usage:
+    pm start <package-name>/<activity-name>
+    pm start -n <package-name>/<activity-name>
+
+The Android side (AndroidAppLauncher) will receive the intent and launch the app.
+"""
+
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+
+def get_launch_dir():
+    """Get the BL_LAUNCH_DIR from environment or fallback file."""
+    launch_dir = os.environ.get("BL_LAUNCH_DIR", "")
+    if not launch_dir:
+        try:
+            with open("/tmp/droiddeck-browser/launch-dir") as f:
+                launch_dir = f.read().strip()
+        except OSError:
+            pass
+    return launch_dir
+
+
+def parse_activity_name(args):
+    """Parse the activity name from pm start arguments."""
+    # pm start com.example/.Activity
+    # pm start -n com.example/.Activity
+    i = 0
+    activity = None
+    while i < len(args):
+        if args[i] == "start":
+            i += 1
+            continue
+        if args[i] in ("-n", "--component"):
+            i += 1
+            if i < len(args):
+                activity = args[i]
+                break
+            return None
+        if args[i].startswith("-"):
+            i += 1
+            continue
+        # First non-flag argument after "start" is the component
+        if activity is None:
+            activity = args[i]
+        i += 1
+    return activity
+
+
+def send_launch_request(launch_dir, activity_name):
+    """Send a request to launch an Android app to the DroidDeck Android side."""
+    if not launch_dir:
+        print("Error: BL_LAUNCH_DIR not set", file=sys.stderr)
+        return 1
+
+    # Use the stores channel for communication (same pattern as droiddeck-open-url)
+    req_dir = Path(launch_dir) / "stores" / "req"
+    req_dir.mkdir(parents=True, exist_ok=True)
+
+    rid = "android-app-%d-%d" % (os.getpid(), int(time.time() * 1000))
+    tmp = req_dir / (rid + ".json.tmp")
+
+    request = {
+        "op": "launch-android-app",
+        "activity": activity_name
+    }
+
+    try:
+        tmp.write_text(json.dumps(request))
+        os.rename(tmp, req_dir / (rid + ".json"))
+        print("Launching Android app: %s" % activity_name, file=sys.stderr)
+        return 0
+    except Exception as e:
+        print("Error sending launch request: %s" % str(e), file=sys.stderr)
+        return 1
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: pm start <package>/<activity>", file=sys.stderr)
+        print("       pm start -n <package>/<activity>", file=sys.stderr)
+        return 1
+
+    activity = parse_activity_name(sys.argv[1:])
+    if not activity:
+        print("Error: No activity name specified", file=sys.stderr)
+        return 1
+
+    launch_dir = get_launch_dir()
+    return send_launch_request(launch_dir, activity)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

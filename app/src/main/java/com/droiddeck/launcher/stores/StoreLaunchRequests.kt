@@ -131,6 +131,25 @@ object StoreLaunchRequests {
                 if (com.droiddeck.launcher.stores.epic.EpicClient.canHandOff(app)) JSONObject().put("ok", true)
                 else JSONObject().put("ok", false).put("reason", "no-account")
             }
+            "launch-android-app" -> {
+                val activity = request.optString("activity")
+                if (activity.isEmpty()) JSONObject().put("ok", false).put("reason", "no-activity")
+                else try {
+                    val intent = android.content.Intent().apply {
+                        component = android.content.ComponentName(
+                            activity.substringBeforeLast("/"),
+                            activity.substringAfterLast("/")
+                        )
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    app.startActivity(intent)
+                    Log.i(TAG, "launch-android-app: $activity")
+                    JSONObject().put("ok", true)
+                } catch (e: Exception) {
+                    Log.w(TAG, "could not launch Android app $activity: ${e.message}")
+                    JSONObject().put("ok", false).put("reason", e.javaClass.simpleName)
+                }
+            }
             else -> JSONObject().put("ok", false).put("reason", "unknown-op")
         }
         try {
